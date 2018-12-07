@@ -468,9 +468,6 @@ final class FrozenBufferedUpdates {
                                             long delGen,
                                             boolean segmentPrivateDeletes) throws IOException {
 
-    TermsEnum termsEnum;
-    PostingsEnum postingsEnum = null;
-
     // TODO: we can process the updates per DV field, from last to first so that
     // if multiple terms affect same document for the same field, we add an update
     // only once (that of the last term). To do that, we can keep a bitset which
@@ -485,6 +482,7 @@ final class FrozenBufferedUpdates {
 
     // We first write all our updates private, and only in the end publish to the ReadersAndUpdates */
     final List<DocValuesFieldUpdates> resolvedUpdates = new ArrayList<>();
+    TermsSeek seeker = new TermsSeek(segState.reader);
     for (Map.Entry<String, FieldUpdatesBuffer> fieldUpdate : updates.entrySet()) {
       String updateField = fieldUpdate.getKey();
       DocValuesFieldUpdates dvUpdates = null;
@@ -493,22 +491,6 @@ final class FrozenBufferedUpdates {
       FieldUpdatesBuffer.BufferedUpdateIterator iterator = value.iterator();
       FieldUpdatesBuffer.BufferedUpdate bufferedUpdate;
       while ((bufferedUpdate = iterator.next()) != null) {
-        Terms terms = segState.reader.terms(bufferedUpdate.termField);
-        if (terms != null) {
-          termsEnum = terms.iterator();
-        } else {
-          // no terms in this segment for this field
-          continue;
-        }
-
-        final int limit;
-        if (delGen == segState.delGen) {
-          assert segmentPrivateDeletes;
-          limit = bufferedUpdate.docUpTo;
-        } else {
-          limit = Integer.MAX_VALUE;
-        }
-        
         // TODO: we traverse the terms in update order (not term order) so that we
         // apply the updates in the correct order, i.e. if two terms update the
         // same document, the last one that came in wins, irrespective of the
@@ -518,23 +500,26 @@ final class FrozenBufferedUpdates {
         // that we cannot rely only on docIDUpto because an app may send two updates
         // which will get same docIDUpto, yet will still need to respect the order
         // those updates arrived.
-
         // TODO: we could at least *collate* by field?
-
-
-        final BytesRef binaryValue;
-        final long longValue;
-        if (bufferedUpdate.hasValue == false) {
-          longValue = -1;
-          binaryValue = null;
-        } else {
-          longValue = bufferedUpdate.numericValue;
-          binaryValue = bufferedUpdate.binaryValue;
-        }
-
-        if (termsEnum.seekExact(bufferedUpdate.termValue)) {
+        if (seeker.nextTerm(bufferedUpdate.termField, bufferedUpdate.termValue)) {
+          final int limit;
+          if (delGen == segState.delGen) {
+            assert segmentPrivateDeletes;
+            limit = bufferedUpdate.docUpTo;
+          } else {
+            limit = Integer.MAX_VALUE;
+          }
+          final BytesRef binaryValue;
+          final long longValue;
+          if (bufferedUpdate.hasValue == false) {
+            longValue = -1;
+            binaryValue = null;
+          } else {
+            longValue = bufferedUpdate.numericValue;
+            binaryValue = bufferedUpdate.binaryValue;
+          }
           // we don't need term frequencies for this
-          postingsEnum = termsEnum.postings(postingsEnum, PostingsEnum.NONE);
+          DocIdSetIterator docIdSetIterator = seeker.getDocs();
           if (dvUpdates == null) {
             if (isNumeric) {
               if (value.hasSingleValue()) {
@@ -562,7 +547,7 @@ final class FrozenBufferedUpdates {
           if (segState.rld.sortMap != null && segmentPrivateDeletes) {
             // This segment was sorted on flush; we must apply seg-private deletes carefully in this case:
             int doc;
-            while ((doc = postingsEnum.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+            while ((doc = docIdSetIterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
               if (acceptDocs == null || acceptDocs.get(doc)) {
                 // The limit is in the pre-sorted doc space:
                 if (segState.rld.sortMap.newToOld(doc) < limit) {
@@ -573,7 +558,7 @@ final class FrozenBufferedUpdates {
             }
           } else {
             int doc;
-            while ((doc = postingsEnum.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+            while ((doc = docIdSetIterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
               if (doc >= limit) {
                 break; // no more docs that can be updated for this term
               }
@@ -702,56 +687,15 @@ final class FrozenBufferedUpdates {
       }
 
       FieldTermIterator iter = deleteTerms.iterator();
-
       BytesRef delTerm;
-      String field = null;
-      TermsEnum termsEnum = null;
-      BytesRef readerTerm = null;
-      PostingsEnum postingsEnum = null;
+      TermsSeek seeker = new SortedTermsSeek(segState.reader);
       while ((delTerm = iter.next()) != null) {
-
-        if (iter.field() != field) {
-          // field changed
-          field = iter.field();
-          Terms terms = segState.reader.terms(field);
-          if (terms != null) {
-            termsEnum = terms.iterator();
-            readerTerm = termsEnum.next();
-          } else {
-            termsEnum = null;
-          }
-        }
-
-        if (termsEnum != null) {
-          int cmp = delTerm.compareTo(readerTerm);
-          if (cmp < 0) {
-            // TODO: can we advance across del terms here?
-            // move to next del term
-            continue;
-          } else if (cmp == 0) {
-            // fall through
-          } else if (cmp > 0) {
-            TermsEnum.SeekStatus status = termsEnum.seekCeil(delTerm);
-            if (status == TermsEnum.SeekStatus.FOUND) {
-              // fall through
-            } else if (status == TermsEnum.SeekStatus.NOT_FOUND) {
-              readerTerm = termsEnum.term();
-              continue;
-            } else {
-              // TODO: can we advance to next field in deleted terms?
-              // no more terms in this segment
-              termsEnum = null;
-              continue;
-            }
-          }
-
+        if (seeker.nextTerm(iter.field(), delTerm)) {
           // we don't need term frequencies for this
-          postingsEnum = termsEnum.postings(postingsEnum, PostingsEnum.NONE);
-
-          assert postingsEnum != null;
-
+          DocIdSetIterator iterator = seeker.getDocs();
+          assert iterator != null;
           int docID;
-          while ((docID = postingsEnum.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+          while ((docID = iterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
 
             // NOTE: there is no limit check on the docID
             // when deleting by Term (unlike by Query)
@@ -816,5 +760,95 @@ final class FrozenBufferedUpdates {
   
   boolean any() {
     return deleteTerms.size() > 0 || deleteQueries.length > 0 || fieldUpdatesCount > 0 ;
+  }
+
+  static class TermsSeek {
+    private final SegmentReader reader;
+    protected String field;
+    protected TermsEnum termsEnum;
+    private PostingsEnum postingsEnum;
+
+    TermsSeek(SegmentReader reader) {
+      this.reader = reader;
+    }
+
+    protected final void nextField(String field) throws IOException {
+      if (this.field == null || this.field.equals(field)) {
+        this.field = field;
+        Terms terms = reader.terms(field);
+        if (terms != null) {
+          termsEnum = terms.iterator();
+          newTermsEnum(termsEnum);
+        } else {
+          termsEnum = null;
+        }
+      }
+    }
+
+    protected void newTermsEnum(TermsEnum termsEnum) throws IOException {}
+
+    boolean nextTerm(String field, BytesRef term) throws IOException {
+      nextField(field);
+      if (termsEnum != null) {
+        return termsEnum.seekExact(term);
+      }
+      return false;
+    }
+
+    DocIdSetIterator getDocs() throws IOException {
+      assert termsEnum != null;
+      return postingsEnum = termsEnum.postings(postingsEnum, PostingsEnum.NONE);
+    }
+  }
+
+  final static class SortedTermsSeek extends TermsSeek {
+    private TermsEnum.SeekStatus status;
+    private BytesRef readerTerm;
+
+    SortedTermsSeek(SegmentReader reader) {
+      super(reader);
+    }
+
+    @Override
+    protected void newTermsEnum(TermsEnum termsEnum) throws IOException {
+      readerTerm = termsEnum.next();
+    }
+
+    @Override
+    boolean nextTerm(String field, BytesRef term) throws IOException {
+      nextField(field);
+      if (termsEnum != null) {
+        int cmp = term.compareTo(readerTerm);
+        if (cmp < 0) {
+          status = TermsEnum.SeekStatus.NOT_FOUND;
+          return false;
+        } else if (cmp == 0) {
+          status = TermsEnum.SeekStatus.FOUND;
+          return true;
+        } else if (cmp > 0) {
+          status = termsEnum.seekCeil(term);
+          switch (status) {
+            case FOUND:
+              return true;
+            case NOT_FOUND:
+              readerTerm = termsEnum.term();
+              return false;
+            case END:
+              // no more terms in this segment
+              termsEnum = null;
+              return false;
+            default:
+              throw new AssertionError("unknown status");
+          }
+        }
+      }
+      return false;
+    }
+
+    @Override
+    DocIdSetIterator getDocs() throws IOException {
+      assert status == TermsEnum.SeekStatus.FOUND;
+      return super.getDocs();
+    }
   }
 }
