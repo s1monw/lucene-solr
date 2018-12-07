@@ -773,7 +773,7 @@ final class FrozenBufferedUpdates {
     }
 
     protected final void nextField(String field) throws IOException {
-      if (this.field == null || this.field.equals(field)) {
+      if (this.field == null || this.field.equals(field) == false) {
         this.field = field;
         Terms terms = reader.terms(field);
         if (terms != null) {
