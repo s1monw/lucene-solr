@@ -19,6 +19,7 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.Comparator;
 
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.Bits;
@@ -57,6 +58,8 @@ final class FieldUpdatesBuffer {
   private FixedBitSet hasValues;
   private String[] fields;
   private final boolean isNumeric;
+  private boolean frozen;
+  private BytesRefArray.SortState sortState;
 
   private FieldUpdatesBuffer(Counter bytesUsed, DocValuesUpdate initialValue, int docUpTo, boolean isNumeric) {
     this.bytesUsed = bytesUsed;
@@ -170,11 +173,13 @@ final class FieldUpdatesBuffer {
   }
 
   private int append(Term term) {
+    assert frozen == false : "field updates are frozen";
     termValues.append(term.bytes);
     return numUpdates++;
   }
 
   BufferedUpdateIterator iterator() {
+
     return new BufferedUpdateIterator();
   }
 
@@ -243,14 +248,14 @@ final class FieldUpdatesBuffer {
    * An iterator that iterates over all updates in insertion order
    */
   class BufferedUpdateIterator {
-    private final BytesRefIterator termValuesIterator;
+    private final BytesRefArray.IndexedBytesRefIterator termValuesIterator;
     private final BytesRefIterator byteValuesIterator;
     private final BufferedUpdate bufferedUpdate = new BufferedUpdate();
     private final Bits updatesWithValue;
-    private int index = 0;
 
     BufferedUpdateIterator() {
-      this.termValuesIterator = termValues.iterator();
+      assert frozen;
+      this.termValuesIterator = termValues.iterator(sortState);
       this.byteValuesIterator = isNumeric ? null : byteValues.iterator();
       updatesWithValue = hasValues == null ? new Bits.MatchAllBits(numUpdates) : hasValues;
     }
@@ -262,7 +267,7 @@ final class FieldUpdatesBuffer {
     BufferedUpdate next() throws IOException {
       BytesRef next = termValuesIterator.next();
       if (next != null) {
-        final int idx = index++;
+        final int idx = termValuesIterator.index();
         bufferedUpdate.termValue = next;
         bufferedUpdate.hasValue = updatesWithValue.get(idx);
         bufferedUpdate.termField = fields[getArrayIndex(fields.length, idx)];
@@ -283,10 +288,32 @@ final class FieldUpdatesBuffer {
         return null;
       }
     }
+
+    public boolean isSorted() {
+      return sortState != null;
+    }
   }
 
   private static int getArrayIndex(int arrayLength, int index) {
     assert arrayLength == 1 || arrayLength > index : "illegal array index length: " + arrayLength + " index: " + index;
     return Math.min(arrayLength-1, index);
+  }
+
+
+  public void freeze() {
+     if (frozen) {
+       throw new IllegalStateException("can't freeze twice");
+     }
+     frozen = true;
+     // we can only sort at this point if all values are shared, we have a single field and all docs have a value
+     // this is at this point a very likely situation in the soft-deletes case which brings soft-deletes
+     // on-par with hard deletes in the way they are applied since we only pay the price once when we sort
+     // them and then can make use of the efficient seekCeil on the term dictionary for all segments
+     // that need to apply these updates.
+     boolean canSort = isNumeric && hasValues == null && fields.length == 1 && numericValues.length == 1;
+     if (canSort) {
+       sortState = termValues.sort(Comparator.naturalOrder());
+       bytesUsed.addAndGet(sortState.ramBytesUsed());
+     }
   }
 }

@@ -30,6 +30,60 @@ import org.apache.lucene.util.TestUtil;
 
 public class TestFieldUpdatesBuffer extends LuceneTestCase {
 
+  public void testSort() throws IOException {
+    Counter counter = Counter.newCounter();
+    DocValuesUpdate.NumericDocValuesUpdate update =
+        new DocValuesUpdate.NumericDocValuesUpdate(new Term("id", "C"), "age", 1);
+    FieldUpdatesBuffer buffer = new FieldUpdatesBuffer(counter, update, 15);
+    buffer.addUpdate(new Term("id", "B"), 1, 15);
+    assertTrue(buffer.hasSingleValue());
+    buffer.addUpdate(new Term("id", "A"), 1, 15);
+    assertTrue(buffer.hasSingleValue());
+    buffer.addUpdate(new Term("id", "G"), 1, 17);
+    assertTrue(buffer.hasSingleValue());
+    buffer.addUpdate(new Term("id", "D"), 1, 16);
+    assertTrue(buffer.hasSingleValue());
+    assertTrue(buffer.isNumeric());
+    buffer.freeze();
+    FieldUpdatesBuffer.BufferedUpdateIterator iterator = buffer.iterator();
+    assertTrue(iterator.isSorted());
+    FieldUpdatesBuffer.BufferedUpdate value = iterator.next();
+    assertNotNull(value);
+    assertEquals("id", value.termField);
+    assertEquals("A", value.termValue.utf8ToString());
+    assertEquals(1, value.numericValue);
+    assertEquals(15, value.docUpTo);
+
+    value = iterator.next();
+    assertNotNull(value);
+    assertEquals("id", value.termField);
+    assertEquals("B", value.termValue.utf8ToString());
+    assertEquals(1, value.numericValue);
+    assertEquals(15, value.docUpTo);
+
+    value = iterator.next();
+    assertNotNull(value);
+    assertEquals("id", value.termField);
+    assertEquals("C", value.termValue.utf8ToString());
+    assertEquals(1, value.numericValue);
+    assertEquals(15, value.docUpTo);
+
+    value = iterator.next();
+    assertNotNull(value);
+    assertEquals("id", value.termField);
+    assertEquals("D", value.termValue.utf8ToString());
+    assertEquals(1, value.numericValue);
+    assertEquals(16, value.docUpTo);
+
+    value = iterator.next();
+    assertNotNull(value);
+    assertEquals("id", value.termField);
+    assertEquals("G", value.termValue.utf8ToString());
+    assertEquals(1, value.numericValue);
+    assertEquals(17, value.docUpTo);
+    assertNull(iterator.next());
+  }
+
   public void testBascis() throws IOException {
     Counter counter = Counter.newCounter();
     DocValuesUpdate.NumericDocValuesUpdate update =
@@ -44,6 +98,7 @@ public class TestFieldUpdatesBuffer extends LuceneTestCase {
     buffer.addUpdate(new Term("id", "8"), 12, 16);
     assertFalse(buffer.hasSingleValue());
     assertTrue(buffer.isNumeric());
+    buffer.freeze();
     FieldUpdatesBuffer.BufferedUpdateIterator iterator = buffer.iterator();
     FieldUpdatesBuffer.BufferedUpdate value = iterator.next();
     assertNotNull(value);
@@ -97,6 +152,7 @@ public class TestFieldUpdatesBuffer extends LuceneTestCase {
       buffer.addNoValue(new Term("id", "3"), Integer.MAX_VALUE);
     }
     buffer.addUpdate(new Term("id", "4"), intValue, Integer.MAX_VALUE);
+    buffer.freeze();
     FieldUpdatesBuffer.BufferedUpdateIterator iterator = buffer.iterator();
     FieldUpdatesBuffer.BufferedUpdate value;
     int count = 0;
@@ -129,6 +185,7 @@ public class TestFieldUpdatesBuffer extends LuceneTestCase {
       buffer.addNoValue(new Term("id", "3"), Integer.MAX_VALUE);
     }
     buffer.addUpdate(new Term("id", "4"), new BytesRef(""), Integer.MAX_VALUE);
+    buffer.freeze();
     FieldUpdatesBuffer.BufferedUpdateIterator iterator = buffer.iterator();
     FieldUpdatesBuffer.BufferedUpdate value;
     int count = 0;
@@ -178,7 +235,9 @@ public class TestFieldUpdatesBuffer extends LuceneTestCase {
         buffer.addNoValue(randomUpdate.term, randomUpdate.docIDUpto);
       }
     }
+    buffer.freeze();
     FieldUpdatesBuffer.BufferedUpdateIterator iterator = buffer.iterator();
+    assumeFalse("assertions only work if insertion order is preserved", iterator.isSorted());
     FieldUpdatesBuffer.BufferedUpdate value;
 
     int count = 0;
@@ -213,7 +272,9 @@ public class TestFieldUpdatesBuffer extends LuceneTestCase {
         buffer.addNoValue(randomUpdate.term, randomUpdate.docIDUpto);
       }
     }
+    buffer.freeze();
     FieldUpdatesBuffer.BufferedUpdateIterator iterator = buffer.iterator();
+    assumeFalse("assertions only work if insertion order is preserved", iterator.isSorted());
     FieldUpdatesBuffer.BufferedUpdate value;
 
     int count = 0;

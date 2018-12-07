@@ -19,6 +19,8 @@ package org.apache.lucene.util;
 import java.util.Arrays;
 import java.util.Comparator;
 
+import org.apache.lucene.search.Sort;
+
 /**
  * A simple append only random-access {@link BytesRef} array that stores full
  * copies of the appended bytes in a {@link ByteBlockPool}.
@@ -117,7 +119,7 @@ public final class BytesRefArray implements SortableBytesRefArray {
     pool.setBytesRef(spare, result, offset, length);
   }
   
-  private int[] sort(final Comparator<BytesRef> comp) {
+  public SortState sort(final Comparator<BytesRef> comp) {
     final int[] orderedEntries = new int[size()];
     for (int i = 0; i < orderedEntries.length; i++) {
       orderedEntries[i] = i;
@@ -158,19 +160,19 @@ public final class BytesRefArray implements SortableBytesRefArray {
       private final BytesRefBuilder scratch1 = new BytesRefBuilder();
       private final BytesRefBuilder scratch2 = new BytesRefBuilder();
     }.sort(0, size());
-    return orderedEntries;
+    return new SortState(orderedEntries);
   }
   
   /**
    * sugar for {@link #iterator(Comparator)} with a <code>null</code> comparator
    */
-  public BytesRefIterator iterator() {
-    return iterator(null);
+  public IndexedBytesRefIterator iterator() {
+    return iterator((SortState)null);
   }
   
   /**
    * <p>
-   * Returns a {@link BytesRefIterator} with point in time semantics. The
+   * Returns a {@link IndexedBytesRefIterator} with point in time semantics. The
    * iterator provides access to all so far appended {@link BytesRef} instances.
    * </p>
    * <p>
@@ -183,22 +185,50 @@ public final class BytesRefArray implements SortableBytesRefArray {
    * </p>
    */
   @Override
-  public BytesRefIterator iterator(final Comparator<BytesRef> comp) {
+  public IndexedBytesRefIterator iterator(final Comparator<BytesRef> comp) {
+    return iterator(comp == null ? null : sort(comp));
+  }
+
+  public IndexedBytesRefIterator iterator(final SortState sortState) {
     final BytesRefBuilder spare = new BytesRefBuilder();
     final BytesRef result = new BytesRef();
     final int size = size();
-    final int[] indices = comp == null ? null : sort(comp);
-    return new BytesRefIterator() {
+    final int[] indices = sortState == null ? null : sortState.indices;
+    return new IndexedBytesRefIterator() {
       int pos = 0;
-      
+      int index = -1;
       @Override
       public BytesRef next() {
         if (pos < size) {
-          setBytesRef(spare, result, indices == null ? pos++ : indices[pos++]);
+          index = indices == null ? pos++ : indices[pos++];
+          setBytesRef(spare, result, index);
           return result;
         }
         return null;
       }
+
+      @Override
+      public int index() {
+        assert index >= 0 : "index must be positive: " + index;
+        return index;
+      }
     };
+  }
+
+  public interface IndexedBytesRefIterator extends BytesRefIterator {
+    int index();
+  }
+
+  public static class SortState implements Accountable {
+    final int[] indices;
+
+    private SortState(int[] indices) {
+      this.indices = indices;
+    }
+
+    @Override
+    public long ramBytesUsed() {
+      return RamUsageEstimator.NUM_BYTES_ARRAY_HEADER + indices.length * Integer.BYTES;
+    }
   }
 }

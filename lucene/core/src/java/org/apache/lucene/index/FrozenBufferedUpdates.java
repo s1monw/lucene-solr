@@ -112,6 +112,9 @@ final class FrozenBufferedUpdates {
     // that Term only once, applying the update to all fields that still need to be
     // updated.
     this.fieldUpdates = Collections.unmodifiableMap(new HashMap<>(updates.fieldUpdates));
+    for (FieldUpdatesBuffer buffer : fieldUpdates.values()) {
+      buffer.freeze();
+    }
     this.fieldUpdatesCount = updates.numFieldUpdates.get();
 
     bytesUsed = (int) ((deleteTerms.ramBytesUsed() + deleteQueries.length * BYTES_PER_DEL_QUERY)
@@ -482,7 +485,6 @@ final class FrozenBufferedUpdates {
 
     // We first write all our updates private, and only in the end publish to the ReadersAndUpdates */
     final List<DocValuesFieldUpdates> resolvedUpdates = new ArrayList<>();
-    TermsSeek seeker = new TermsSeek(segState.reader);
     for (Map.Entry<String, FieldUpdatesBuffer> fieldUpdate : updates.entrySet()) {
       String updateField = fieldUpdate.getKey();
       DocValuesFieldUpdates dvUpdates = null;
@@ -490,6 +492,7 @@ final class FrozenBufferedUpdates {
       boolean isNumeric = value.isNumeric();
       FieldUpdatesBuffer.BufferedUpdateIterator iterator = value.iterator();
       FieldUpdatesBuffer.BufferedUpdate bufferedUpdate;
+      TermsSeek seeker = iterator.isSorted() ? new SortedTermsSeek(segState.reader) : new TermsSeek(segState.reader);
       while ((bufferedUpdate = iterator.next()) != null) {
         // TODO: we traverse the terms in update order (not term order) so that we
         // apply the updates in the correct order, i.e. if two terms update the
