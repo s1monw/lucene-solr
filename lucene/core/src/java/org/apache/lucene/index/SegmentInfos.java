@@ -160,16 +160,25 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   /** The Lucene version major that was used to create the index. */
   private final int indexCreatedVersionMajor;
 
+  /** The minimum supported major version for this index */
+  private final int minSupportedMajorVersion;
+
   /** Sole constructor.
    *  @param indexCreatedVersionMajor the Lucene version major at index creation time, or 6 if the index was created before 7.0 */
   public SegmentInfos(int indexCreatedVersionMajor) {
+     this(indexCreatedVersionMajor, Version.MIN_SUPPORTED_MAJOR_VERSION);
+  }
+
+  SegmentInfos(int indexCreatedVersionMajor, int minSupportedMajorVersion) {
     if (indexCreatedVersionMajor > Version.LATEST.major) {
       throw new IllegalArgumentException("indexCreatedVersionMajor is in the future: " + indexCreatedVersionMajor);
     }
-    if (indexCreatedVersionMajor < 6) {
-      throw new IllegalArgumentException("indexCreatedVersionMajor must be >= 6, got: " + indexCreatedVersionMajor);
+    if (indexCreatedVersionMajor < minSupportedMajorVersion) {
+      throw new IllegalArgumentException("indexCreatedVersionMajor must be >= " + minSupportedMajorVersion
+          +", got: " + indexCreatedVersionMajor);
     }
     this.indexCreatedVersionMajor = indexCreatedVersionMajor;
+    this.minSupportedMajorVersion = minSupportedMajorVersion;
   }
 
   /** Returns {@link SegmentCommitInfo} at the provided
@@ -286,7 +295,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     //System.out.println(Thread.currentThread() + ": SegmentInfos.readCommit " + segmentFileName);
     try (ChecksumIndexInput input = directory.openChecksumInput(segmentFileName, IOContext.READ)) {
       try {
-        return readCommit(directory, input, generation);
+        return readCommit(directory, input, generation, Version.MIN_SUPPORTED_MAJOR_VERSION);
       } catch (EOFException | NoSuchFileException | FileNotFoundException e) {
         throw new CorruptIndexException("Unexpected file read error while reading index.", input, e);
       }
@@ -294,7 +303,8 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   }
 
   /** Read the commit from the provided {@link ChecksumIndexInput}. */
-  public static final SegmentInfos readCommit(Directory directory, ChecksumIndexInput input, long generation) throws IOException {
+  public static final SegmentInfos readCommit(Directory directory, ChecksumIndexInput input, long generation,
+                                              int minSupportedMajorVersion) throws IOException {
 
     // NOTE: as long as we want to throw indexformattooold (vs corruptindexexception), we need
     // to read the magic ourselves.
@@ -314,13 +324,13 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
           + ".x] can't be greater than the version that wrote the segment infos: [" + luceneVersion + "]" , input);
     }
 
-    if (indexCreatedVersion < Version.LATEST.major - 1) {
+    if (indexCreatedVersion < minSupportedMajorVersion) {
       throw new IndexFormatTooOldException(input, "This index was initially created with Lucene "
           + indexCreatedVersion + ".x while the current version is " + Version.LATEST
           + " and Lucene only supports reading the current and previous major versions.");
     }
 
-    SegmentInfos infos = new SegmentInfos(indexCreatedVersion);
+    SegmentInfos infos = new SegmentInfos(indexCreatedVersion, minSupportedMajorVersion);
     infos.id = id;
     infos.generation = generation;
     infos.lastGeneration = generation;
@@ -1031,5 +1041,9 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
    *  indices report 6 as a creation version. */
   public int getIndexCreatedVersionMajor() {
     return indexCreatedVersionMajor;
+  }
+
+  public int getMinSupportedMajorVersion() {
+    return minSupportedMajorVersion;
   }
 }

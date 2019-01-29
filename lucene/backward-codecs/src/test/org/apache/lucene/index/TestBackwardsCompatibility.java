@@ -18,11 +18,14 @@ package org.apache.lucene.index;
 
 
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.ParsePosition;
@@ -68,8 +71,10 @@ import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.BaseDirectoryWrapper;
 import org.apache.lucene.store.ByteBuffersDirectory;
+import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.store.SimpleFSDirectory;
 import org.apache.lucene.util.Bits;
@@ -652,6 +657,46 @@ public class TestBackwardsCompatibility extends LuceneTestCase {
       }
     }
     fail(msg.toString());
+  }
+
+  public void testCanReadSegmentInfosFromPreviousVersion() throws IOException {
+    StringBuilder builder = new StringBuilder("^(");
+    int minVersionSupported = 7;
+    for (int i = minVersionSupported; i <= Version.LATEST.major; i++) {
+      builder.append(i);
+      if (i != Version.LATEST.major) {
+        builder.append("|");
+      }
+    }
+    builder.append(").*");
+    String supportedPattern = builder.toString();
+
+    for (int i = 0; i < unsupportedNames.length; i++) {
+      Path oldIndexDir = createTempDir(unsupportedNames[i]);
+      TestUtil.unzip(getDataInputStream("unsupported." + unsupportedNames[i] + ".zip"), oldIndexDir);
+      try (BaseDirectoryWrapper dir = newFSDirectory(oldIndexDir)) {
+        // don't checkindex, these are intentionally not supported
+        dir.setCheckIndexOnClose(false);
+        String segmentFileName = Arrays.stream(dir.listAll()).filter(s -> s.startsWith(IndexFileNames.SEGMENTS))
+            .findAny().orElseGet(() -> {
+              throw new AssertionError("no segments file found");
+            });
+
+
+        long generation = SegmentInfos.generationFromSegmentsFileName(segmentFileName);
+        try (ChecksumIndexInput input = dir.openChecksumInput(segmentFileName, IOContext.READ)) {
+          try {
+            SegmentInfos.readCommit(dir, input, generation, minVersionSupported);
+          } catch (IOException e) {
+            if (unsupportedNames[i].matches(supportedPattern)) {
+              throw e;
+            } else {
+              // that's fine - unsupported
+            }
+          }
+        }
+      }
+    }
   }
   
   /** This test checks that *only* IndexFormatTooOldExceptions are thrown when you open and operate on too old indexes! */

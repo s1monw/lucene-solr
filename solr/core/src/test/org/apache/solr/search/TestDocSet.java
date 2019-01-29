@@ -457,7 +457,7 @@ public class TestDocSet extends LuceneTestCase {
 
       @Override
       public LeafMetaData getMetaData() {
-        return new LeafMetaData(Version.LATEST.major, Version.LATEST, null);
+        return LeafMetaData.LATEST;
       }
 
       @Override
