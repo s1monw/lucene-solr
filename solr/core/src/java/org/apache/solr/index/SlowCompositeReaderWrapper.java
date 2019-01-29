@@ -76,7 +76,7 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
     in = reader;
     in.registerParentReader(this);
     if (reader.leaves().isEmpty()) {
-      metaData = new LeafMetaData(Version.LATEST.major, Version.LATEST, null);
+      metaData = LeafMetaData.LATEST;
     } else {
       Version minVersion = Version.LATEST;
       for (LeafReaderContext leafReaderContext : reader.leaves()) {

@@ -246,7 +246,7 @@ public abstract class ReplicaNode extends Node {
 
         SegmentInfos syncInfos = SegmentInfos.readCommit(dir,
                                                          toIndexInput(job.getCopyState().infosBytes),
-                                                         job.getCopyState().gen);
+                                                         job.getCopyState().gen, Version.MIN_SUPPORTED_MAJOR_VERSION);
 
         // Must always commit to a larger generation than what's currently in the index:
         syncInfos.updateGeneration(infos);
@@ -383,10 +383,9 @@ public abstract class ReplicaNode extends Node {
       job.finish();
 
       // Turn byte[] back to SegmentInfos:
-      byte[] infosBytes = copyState.infosBytes;
       SegmentInfos infos = SegmentInfos.readCommit(dir,
                                                    toIndexInput(copyState.infosBytes),
-                                                   copyState.gen);
+                                                   copyState.gen, Version.MIN_SUPPORTED_MAJOR_VERSION);
       assert infos.getVersion() == copyState.version;
 
       message("  version=" + infos.getVersion() + " segments=" + infos.toString());

@@ -174,6 +174,16 @@ public final class Version {
   public static final Version LUCENE_CURRENT = LATEST;
 
   /**
+   * The minimum supported lucene index version. Indices that are created with
+   * this major version or higher are guaranteed to be supported both for reading and
+   * writing. Additionally Lucene guarantees API compatibility with these indices.
+   * Lucene might be able to read indices created in prior to this version given that
+   * codecs and postings formats are available but in this case no API compatibility with the index is guaranteed.
+   * This version is guaranteed to be {@link #LATEST} - 1
+   */
+  public static final int MIN_SUPPORTED_MAJOR_VERSION = LATEST.major-1;
+
+  /**
    * Parse a version number of the form {@code "major.minor.bugfix.prerelease"}.
    *
    * Part {@code ".bugfix"} and part {@code ".prerelease"} are optional.

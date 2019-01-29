@@ -25,18 +25,28 @@ import org.apache.lucene.util.Version;
  */
 public final class LeafMetaData {
 
+  /**
+   * LeafMetaData created with the latest major version and a null sort
+   */
+  public static final LeafMetaData LATEST = new LeafMetaData(Version.LATEST.major, Version.LATEST, null);
   private final int createdVersionMajor;
   private final Version minVersion;
   private final Sort sort;
 
   /** Expert: Sole constructor. Public for use by custom {@link LeafReader} impls. */
   public LeafMetaData(int createdVersionMajor, Version minVersion, Sort sort) {
+    this(createdVersionMajor, Version.LATEST.major-1, minVersion, sort);
+  }
+
+  //pkg-private to prevent faking the minSupportedMajor outside of core.
+  LeafMetaData(int createdVersionMajor, int minSupportedMajorVersion, Version minVersion, Sort sort) {
     this.createdVersionMajor = createdVersionMajor;
     if (createdVersionMajor > Version.LATEST.major) {
       throw new IllegalArgumentException("createdVersionMajor is in the future: " + createdVersionMajor);
     }
-    if (createdVersionMajor < 6) {
-      throw new IllegalArgumentException("createdVersionMajor must be >= 6, got: " + createdVersionMajor);
+    if (createdVersionMajor < minSupportedMajorVersion) {
+      throw new IllegalArgumentException("createdVersionMajor must be >= " + minSupportedMajorVersion
+          + ", got: " + createdVersionMajor);
     }
     if (createdVersionMajor >= 7 && minVersion == null) {
       throw new IllegalArgumentException("minVersion must be set when createdVersionMajor is >= 7");

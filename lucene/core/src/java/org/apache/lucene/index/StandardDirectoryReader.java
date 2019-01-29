@@ -58,27 +58,30 @@ public final class StandardDirectoryReader extends DirectoryReader {
     return new SegmentInfos.FindSegmentsFile<DirectoryReader>(directory) {
       @Override
       protected DirectoryReader doBody(String segmentFileName) throws IOException {
-        SegmentInfos sis = SegmentInfos.readCommit(directory, segmentFileName);
-        final SegmentReader[] readers = new SegmentReader[sis.size()];
-        boolean success = false;
-        try {
-          for (int i = sis.size()-1; i >= 0; i--) {
-            readers[i] = new SegmentReader(sis.info(i), sis.getIndexCreatedVersionMajor(), IOContext.READ);
-          }
-
-          // This may throw CorruptIndexException if there are too many docs, so
-          // it must be inside try clause so we close readers in that case:
-          DirectoryReader reader = new StandardDirectoryReader(directory, readers, null, sis, false, false);
-          success = true;
-
-          return reader;
-        } finally {
-          if (success == false) {
-            IOUtils.closeWhileHandlingException(readers);
-          }
-        }
+        return openSegmentInfos(directory, SegmentInfos.readCommit(directory, segmentFileName));
       }
     }.run(commit);
+  }
+
+  public static DirectoryReader openSegmentInfos(final Directory directory, SegmentInfos sis) throws IOException {
+    final SegmentReader[] readers = new SegmentReader[sis.size()];
+    boolean success = false;
+    try {
+      for (int i = sis.size()-1; i >= 0; i--) {
+        readers[i] = new SegmentReader(sis.info(i), sis.getIndexCreatedVersionMajor(), sis.getMinSupportedMajorVersion(), IOContext.READ);
+      }
+
+      // This may throw CorruptIndexException if there are too many docs, so
+      // it must be inside try clause so we close readers in that case:
+      DirectoryReader reader = new StandardDirectoryReader(directory, readers, null, sis, false, false);
+      success = true;
+
+      return reader;
+    } finally {
+      if (success == false) {
+        IOUtils.closeWhileHandlingException(readers);
+      }
+    }
   }
 
   /** Used by near real-time search */
@@ -172,7 +175,7 @@ public final class StandardDirectoryReader extends DirectoryReader {
         SegmentReader newReader;
         if (oldReader == null || commitInfo.info.getUseCompoundFile() != oldReader.getSegmentInfo().info.getUseCompoundFile()) {
           // this is a new reader; in case we hit an exception we can decRef it safely
-          newReader = new SegmentReader(commitInfo, infos.getIndexCreatedVersionMajor(), IOContext.READ);
+          newReader = new SegmentReader(commitInfo, infos.getIndexCreatedVersionMajor(), infos.getMinSupportedMajorVersion(), IOContext.READ);
           newReaders[i] = newReader;
         } else {
           if (oldReader.isNRT) {

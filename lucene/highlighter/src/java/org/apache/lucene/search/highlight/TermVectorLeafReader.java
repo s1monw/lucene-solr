@@ -168,12 +168,12 @@ public class TermVectorLeafReader extends LeafReader {
   }
 
   @Override
-  public void document(int docID, StoredFieldVisitor visitor) throws IOException {
+  public void document(int docID, StoredFieldVisitor visitor) {
   }
 
   @Override
   public LeafMetaData getMetaData() {
-    return new LeafMetaData(Version.LATEST.major, null, null);
+    return LeafMetaData.LATEST;
   }
 
   @Override

@@ -16,7 +16,6 @@
  */
 package org.apache.lucene.index;
 
-
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.mockfile.ExtrasFS;
@@ -41,7 +40,7 @@ public class TestSegmentInfos extends LuceneTestCase {
 
   public void testIllegalCreatedVersion() {
     IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> new SegmentInfos(5));
-    assertEquals("indexCreatedVersionMajor must be >= 6, got: 5", e.getMessage());
+    assertEquals("indexCreatedVersionMajor must be >= 8, got: 5", e.getMessage());
     e = expectThrows(IllegalArgumentException.class, () -> new SegmentInfos(Version.LATEST.major + 1));
     assertEquals("indexCreatedVersionMajor is in the future: " + (Version.LATEST.major + 1), e.getMessage());
   }
