@@ -18,6 +18,7 @@
 package org.apache.lucene.index;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -2813,5 +2814,53 @@ public class TestIndexSorting extends LuceneTestCase {
     }
     w.close();
     dir.close();
+  }
+
+  public void testSortAfterInt() throws IOException {
+      Directory tmpDir = newDirectory();
+      Directory dir = newDirectory();
+      IndexWriterConfig iwc = new IndexWriterConfig(new MockAnalyzer(random()));
+      IndexWriter w = new IndexWriter(tmpDir, iwc);
+      Document doc = new Document();
+      doc.add(new NumericDocValuesField("foo", 18));
+      w.addDocument(doc);
+      // so we get more than one segment, so that forceMerge actually does merge, since we only get a sorted segment by merging:
+      w.commit();
+
+      doc = new Document();
+      doc.add(new NumericDocValuesField("foo", -1));
+      w.addDocument(doc);
+      w.commit();
+
+      doc = new Document();
+      doc.add(new NumericDocValuesField("foo", 7));
+      w.addDocument(doc);
+      w.commit();
+      w.close();
+      Sort indexSort = new Sort(new SortField("foo", SortField.Type.INT));
+
+      iwc = new IndexWriterConfig(new MockAnalyzer(random())).setIndexSort(indexSort);
+      w = new IndexWriter(dir, iwc);
+      try (DirectoryReader reader = DirectoryReader.open(tmpDir)) {
+        List<CodecReader> readers = new ArrayList<>();
+        for (LeafReaderContext ctx : reader.leaves()) {
+          readers.add(SlowCodecReaderWrapper.wrap(SortingLeafReader.wrap(ctx.reader(), indexSort)));
+        }
+        w.addIndexes(readers.toArray(new CodecReader[0]));
+      }
+
+
+      DirectoryReader r = DirectoryReader.open(w);
+      LeafReader leaf = getOnlyLeafReader(r);
+      assertEquals(3, leaf.maxDoc());
+      NumericDocValues values = leaf.getNumericDocValues("foo");
+      assertEquals(0, values.nextDoc());
+      assertEquals(-1, values.longValue());
+      assertEquals(1, values.nextDoc());
+      assertEquals(7, values.longValue());
+      assertEquals(2, values.nextDoc());
+      assertEquals(18, values.longValue());
+      assertNotNull(leaf.getMetaData().getSort());
+      IOUtils.close(r, w, dir, tmpDir);
   }
 }
