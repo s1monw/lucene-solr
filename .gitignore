@@ -6,6 +6,9 @@ build/
 
 # IntelliJ IDEA
 /.idea/
+*.iml
+*.ipr
+*.iws
 #    IntelliJ creates this folder, ignore.
 /dev-tools/missing-doclet/out/
 
